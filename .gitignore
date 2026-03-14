@@ -1,0 +1,18 @@
+# Node
+node_modules/
+.next/
+dist/
+
+# Local env files
+.env
+.env.local
+.env.*.local
+
+# Vercel
+.vercel/
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/
