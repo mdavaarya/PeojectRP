@@ -1,5 +1,5 @@
-import { AlumniProfile, SearchProfile, TrackingEvidence, ConfidenceBreakdown, TrackingStatus } from '@/types';
-
+import { AlumniProfile, SearchProfile } from '@/types';
+import { TrackingEvidence, ConfidenceBreakdown, TrackingStatus } from '@/types/tracking';
 export interface ScoredCandidate {
   evidence: TrackingEvidence;
   breakdown: ConfidenceBreakdown;

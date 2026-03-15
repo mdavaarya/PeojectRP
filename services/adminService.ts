@@ -1,7 +1,21 @@
-import { supabase } from '@/lib/supabaseClient';
+import { createClient } from '@supabase/supabase-js';
 import { AlumniProfile, DashboardStats, ProgramDistribution, MilestoneStatusDistribution } from '@/types';
 
+function getClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  
+  if (!url || !key) {
+    throw new Error('Supabase URL and key are required');
+  }
+  
+  return createClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
+
 export async function getDashboardStats(): Promise<DashboardStats> {
+  const supabase = getClient();
   const [
     { count: total_alumni },
     { count: verified_milestones },
@@ -14,14 +28,15 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     supabase.from('skills_certifications').select('*', { count: 'exact', head: true }),
   ]);
   return {
-    total_alumni: total_alumni || 0,
-    verified_milestones: verified_milestones || 0,
-    pending_milestones: pending_milestones || 0,
+    total_alumni:         total_alumni         || 0,
+    verified_milestones:  verified_milestones  || 0,
+    pending_milestones:   pending_milestones   || 0,
     total_certifications: total_certifications || 0,
   };
 }
 
 export async function getProgramDistribution(): Promise<ProgramDistribution[]> {
+  const supabase = getClient();
   const { data } = await supabase.from('alumni_profiles').select('study_program');
   if (!data) return [];
   const map: Record<string, number> = {};
@@ -30,6 +45,7 @@ export async function getProgramDistribution(): Promise<ProgramDistribution[]> {
 }
 
 export async function getMilestoneStatusDistribution(): Promise<MilestoneStatusDistribution[]> {
+  const supabase = getClient();
   const { data } = await supabase.from('career_milestones').select('verification_status');
   if (!data) return [];
   const map: Record<string, number> = {};
@@ -38,18 +54,27 @@ export async function getMilestoneStatusDistribution(): Promise<MilestoneStatusD
 }
 
 export async function getAllAlumni(): Promise<AlumniProfile[]> {
-  const { data } = await supabase.from('alumni_profiles').select('*, users(email)').order('full_name');
+  const supabase = getClient();
+  const { data, error } = await supabase
+    .from('alumni_profiles')
+    .select('*, users(email)')
+    .order('full_name');
+  if (error) console.error('[adminService] getAllAlumni error:', error.message);
   return (data as any[]) || [];
 }
 
 export async function deleteAlumni(alumniId: string, userId: string): Promise<void> {
+  const supabase = getClient();
   await supabase.from('career_milestones').delete().eq('alumni_id', alumniId);
   await supabase.from('skills_certifications').delete().eq('alumni_id', alumniId);
+  await supabase.from('search_profiles').delete().eq('alumni_id', alumniId);
+  await supabase.from('tracking_results').delete().eq('alumni_id', alumniId);
   await supabase.from('alumni_profiles').delete().eq('id', alumniId);
   await supabase.from('users').delete().eq('id', userId);
 }
 
 export async function getReportData(): Promise<any[]> {
+  const supabase = getClient();
   const { data } = await supabase
     .from('alumni_profiles')
     .select(`
