@@ -20,6 +20,7 @@ export async function POST(req: NextRequest) {
     const jobId = await runTrackingJob('manual', user.id, alumniIds);
     return NextResponse.json({ success: true, job_id: jobId });
   } catch (err: any) {
+    console.error('[API] tracking/run error:', err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

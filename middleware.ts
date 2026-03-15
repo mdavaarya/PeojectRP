@@ -38,6 +38,10 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
+  if (pathname.startsWith('/auth')) {
+    return response;
+  }
+
   // Get session
   const { data: { session } } = await supabase.auth.getSession();
 
