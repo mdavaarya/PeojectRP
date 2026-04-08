@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabase
     .from('tracking_results')
-    .select('*, tracking_evidence(*)')
+    .select('*, tracking_evidence(*), alumni_profiles(full_name, study_program, graduation_year, nim)')
     .order('confidence_score', { ascending: false });
 
   if (alumni_id) {

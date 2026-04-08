@@ -1,49 +1,17 @@
 import { TrackingEvidence, TrackingSource } from '@/types';
 
 /**
- * EXTERNAL API FETCHER
+ * EXTERNAL FETCHER — Refocused untuk tugas:
+ * Cari: LinkedIn, Instagram, Facebook, TikTok, Email, HP, Tempat kerja, Posisi
  *
- * Mengambil data dari sumber publik.
- * Setiap fetcher mengembalikan array TrackingEvidence (parsial)
- * yang kemudian di-score oleh disambiguationEngine.
+ * Strategi:
+ * - LinkedIn/IG/FB/TikTok → via Google Custom Search (site: operator)
+ * - Scholar → tetap dipertahankan untuk alumni akademisi
+ * - ORCID → tetap untuk alumni peneliti
+ * - Quota: max 6 query/alumni untuk hemat kuota Google (100/hari gratis)
  */
 
-// ── ORCID Public API (gratis, tidak butuh key) ─────────────────────────────
-export async function fetchFromORCID(
-  name: string,
-  affiliationKeyword: string
-): Promise<Partial<TrackingEvidence>[]> {
-  try {
-    const query = encodeURIComponent(`${name} ${affiliationKeyword}`);
-    const url = `https://pub.orcid.org/v3.0/search?q=${query}&rows=5`;
-
-    const res = await fetch(url, {
-      headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(8000),
-    });
-
-    if (!res.ok) return [];
-
-    const data = await res.json();
-    const results = data?.['expanded-result'] ?? [];
-
-    return results.map((r: any) => ({
-      source: 'orcid' as TrackingSource,
-      source_url: `https://orcid.org/${r['orcid-id']}`,
-      title: `ORCID Profile: ${r['given-names'] ?? ''} ${r['family-name'] ?? ''}`.trim(),
-      found_name: `${r['given-names'] ?? ''} ${r['family-name'] ?? ''}`.trim(),
-      found_affiliation: r['institution-name']?.[0] ?? '',
-      snippet: r['other-name']?.[0] ?? '',
-      raw_data: r,
-      fetched_at: new Date().toISOString(),
-    }));
-  } catch {
-    return [];
-  }
-}
-
-// ── Google Custom Search API ───────────────────────────────────────────────
-// Butuh GOOGLE_SEARCH_API_KEY dan GOOGLE_SEARCH_CX di env
+// ── Google Custom Search (dipakai untuk semua sosmed via site: operator) ──
 export async function fetchFromGoogle(
   queryText: string,
   source: TrackingSource = 'google'
@@ -57,22 +25,26 @@ export async function fetchFromGoogle(
   }
 
   try {
-    const q   = encodeURIComponent(queryText);
-    const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${q}&num=5`;
-
+    const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(queryText)}&num=5`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      console.warn(`[Fetcher] Google API error: ${res.status} ${res.statusText}`);
+      return [];
+    }
 
     const data = await res.json();
     const items = data?.items ?? [];
 
     return items.map((item: any) => {
-      // Ekstrak sinyal dari snippet dan title
       const combined = `${item.title ?? ''} ${item.snippet ?? ''}`;
+      const link = item.link ?? '';
+
+      // Deteksi tipe sosmed dari URL
+      const detectedSource = detectSourceFromUrl(link) ?? source;
 
       return {
-        source,
-        source_url: item.link ?? '',
+        source: detectedSource,
+        source_url: link,
         title:      item.title ?? '',
         snippet:    item.snippet ?? '',
         found_name: extractNameFromText(combined),
@@ -80,33 +52,44 @@ export async function fetchFromGoogle(
         found_role: extractRoleFromText(combined),
         found_location: extractLocationFromText(combined),
         activity_year: extractYearFromText(combined),
-        raw_data: item,
+        // Simpan URL sosmed di raw_data untuk dipakai update profil alumni
+        raw_data: {
+          ...item,
+          detected_linkedin: isLinkedIn(link) ? link : null,
+          detected_instagram: isInstagram(link) ? link : null,
+          detected_facebook: isFacebook(link) ? link : null,
+          detected_tiktok: isTikTok(link) ? link : null,
+          detected_email: extractEmailFromText(combined),
+          detected_phone: extractPhoneFromText(combined),
+          detected_employment_type: detectEmploymentType(combined),
+          detected_position: extractRoleFromText(combined),
+          detected_company: extractAffiliationFromText(combined),
+          detected_work_address: extractLocationFromText(combined),
+        },
         fetched_at: new Date().toISOString(),
       };
     });
-  } catch {
+  } catch (err: any) {
+    console.error('[Fetcher] Google fetch error:', err.message);
     return [];
   }
 }
 
-// ── SerpAPI untuk Scholar (opsional, butuh key) ────────────────────────────
+// ── Scholar via SerpAPI atau Google fallback ──────────────────────────────
 export async function fetchFromScholar(
   name: string,
   affiliation: string
 ): Promise<Partial<TrackingEvidence>[]> {
   const apiKey = process.env.SERPAPI_KEY;
   if (!apiKey) {
-    // Fallback: gunakan Google Custom Search dengan site:scholar.google.com
-    return fetchFromGoogle(`"${name}" "${affiliation}" scholar`, 'scholar');
+    // Fallback ke Google dengan filter scholar
+    return fetchFromGoogle(`"${name}" "${affiliation}" scholar OR publikasi OR penelitian`, 'scholar');
   }
 
   try {
-    const q   = encodeURIComponent(`${name} ${affiliation}`);
-    const url = `https://serpapi.com/search.json?engine=google_scholar&q=${q}&api_key=${apiKey}&num=5`;
-
+    const url = `https://serpapi.com/search.json?engine=google_scholar&q=${encodeURIComponent(`${name} ${affiliation}`)}&api_key=${apiKey}&num=5`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if (!res.ok) return [];
-
     const data = await res.json();
     const results = data?.organic_results ?? [];
 
@@ -127,113 +110,37 @@ export async function fetchFromScholar(
   }
 }
 
-// ── GitHub API (gratis, rate-limited 60 req/jam tanpa auth) ───────────────
-export async function fetchFromGitHub(
-  name: string
+// ── ORCID (gratis, tanpa key) ─────────────────────────────────────────────
+export async function fetchFromORCID(
+  name: string,
+  affiliationKeyword: string
 ): Promise<Partial<TrackingEvidence>[]> {
   try {
-    const q   = encodeURIComponent(name);
-    const url = `https://api.github.com/search/users?q=${q}+type:user&per_page=3`;
-
-    const headers: Record<string, string> = {
-      Accept: 'application/vnd.github+json',
-    };
-
-    const token = process.env.GITHUB_TOKEN;
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-
-    const res = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
+    const url = `https://pub.orcid.org/v3.0/search?q=${encodeURIComponent(`${name} ${affiliationKeyword}`)}&rows=3`;
+    const res = await fetch(url, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(8000),
+    });
     if (!res.ok) return [];
-
     const data = await res.json();
-    const users = data?.items ?? [];
+    const results = data?.['expanded-result'] ?? [];
 
-    // Untuk setiap user, ambil detail
-    const results: Partial<TrackingEvidence>[] = [];
-    for (const user of users.slice(0, 3)) {
-      const detailRes = await fetch(user.url, { headers });
-      if (!detailRes.ok) continue;
-      const detail = await detailRes.json();
-
-      results.push({
-        source: 'github' as TrackingSource,
-        source_url: detail.html_url ?? '',
-        title: `GitHub: ${detail.login}`,
-        snippet: detail.bio ?? '',
-        found_name: detail.name ?? detail.login ?? '',
-        found_affiliation: detail.company ?? '',
-        found_location: detail.location ?? '',
-        found_role: 'Software Developer',
-        raw_data: detail,
-        fetched_at: new Date().toISOString(),
-      });
-    }
-
-    return results;
+    return results.map((r: any) => ({
+      source: 'orcid' as TrackingSource,
+      source_url: `https://orcid.org/${r['orcid-id']}`,
+      title: `ORCID: ${r['given-names'] ?? ''} ${r['family-name'] ?? ''}`.trim(),
+      found_name: `${r['given-names'] ?? ''} ${r['family-name'] ?? ''}`.trim(),
+      found_affiliation: r['institution-name']?.[0] ?? '',
+      found_role: 'Researcher',
+      raw_data: r,
+      fetched_at: new Date().toISOString(),
+    }));
   } catch {
     return [];
   }
 }
 
-// ── Text extraction helpers ────────────────────────────────────────────────
-
-function extractNameFromText(text: string): string {
-  // Heuristic: cari pola "Nama - Jabatan" atau nama dengan kapital
-  const match = text.match(/^([A-Z][a-z]+(?: [A-Z][a-z]+){1,3})/);
-  return match?.[1] ?? '';
-}
-
-function extractAffiliationFromText(text: string): string {
-  const affiliationKeywords = [
-    'universitas', 'university', 'institut', 'institute',
-    'pt ', 'cv ', 'tbk', 'corp', 'inc', 'ltd', 'co.',
-  ];
-  const lower = text.toLowerCase();
-  for (const kw of affiliationKeywords) {
-    const idx = lower.indexOf(kw);
-    if (idx !== -1) {
-      return text.slice(idx, idx + 60).split(/[,|·\n]/)[0].trim();
-    }
-  }
-  return '';
-}
-
-function extractRoleFromText(text: string): string {
-  const roles = [
-    'software engineer', 'data scientist', 'developer', 'manager',
-    'director', 'CEO', 'CTO', 'lecturer', 'dosen', 'researcher',
-    'analis', 'konsultan', 'mahasiswa', 'professor', 'dr.', 'dr ',
-  ];
-  const lower = text.toLowerCase();
-  for (const role of roles) {
-    if (lower.includes(role.toLowerCase())) {
-      return role;
-    }
-  }
-  return '';
-}
-
-function extractLocationFromText(text: string): string {
-  const cities = [
-    'jakarta', 'surabaya', 'bandung', 'malang', 'yogyakarta', 'semarang',
-    'medan', 'makassar', 'bali', 'denpasar', 'singapore', 'malaysia',
-    'australia', 'netherlands', 'germany', 'united states', 'japan',
-  ];
-  const lower = text.toLowerCase();
-  for (const city of cities) {
-    if (lower.includes(city)) {
-      return city.charAt(0).toUpperCase() + city.slice(1);
-    }
-  }
-  return '';
-}
-
-function extractYearFromText(text: string): number | undefined {
-  const match = text.match(/\b(20\d{2}|19[89]\d)\b/);
-  return match ? parseInt(match[1]) : undefined;
-}
-
-// ── Dispatcher: pilih fetcher berdasarkan source ───────────────────────────
+// ── Dispatcher ────────────────────────────────────────────────────────────
 export async function fetchBySource(
   source: TrackingSource,
   queryText: string,
@@ -245,13 +152,99 @@ export async function fetchBySource(
       return fetchFromORCID(nameVariant, affiliationKeyword);
     case 'scholar':
       return fetchFromScholar(nameVariant, affiliationKeyword);
-    case 'github':
-      return fetchFromGitHub(nameVariant);
-    case 'google':
+    // LinkedIn, Instagram, Facebook, TikTok, Google, Web → semua via Google Custom Search
     case 'linkedin':
+    case 'instagram' as any:
+    case 'facebook' as any:
+    case 'tiktok' as any:
+    case 'google':
     case 'researchgate':
     case 'web':
     default:
       return fetchFromGoogle(queryText, source);
   }
+}
+
+// ── URL detectors ─────────────────────────────────────────────────────────
+function detectSourceFromUrl(url: string): TrackingSource | null {
+  if (isLinkedIn(url))   return 'linkedin';
+  if (isInstagram(url))  return 'instagram' as TrackingSource;
+  if (isFacebook(url))   return 'facebook' as TrackingSource;
+  if (isTikTok(url))     return 'tiktok' as TrackingSource;
+  if (url.includes('scholar.google')) return 'scholar';
+  if (url.includes('orcid.org'))      return 'orcid';
+  if (url.includes('researchgate'))   return 'researchgate';
+  return null;
+}
+
+function isLinkedIn(url: string)   { return url.includes('linkedin.com'); }
+function isInstagram(url: string)  { return url.includes('instagram.com'); }
+function isFacebook(url: string)   { return url.includes('facebook.com'); }
+function isTikTok(url: string)     { return url.includes('tiktok.com'); }
+
+// ── Text extractors ───────────────────────────────────────────────────────
+function extractNameFromText(text: string): string {
+  const match = text.match(/^([A-Z][a-z]+(?: [A-Z][a-z]+){1,3})/);
+  return match?.[1] ?? '';
+}
+
+function extractAffiliationFromText(text: string): string {
+  const keywords = ['universitas','university','institut','pt ','cv ','tbk','corp','inc','ltd','pemerintah','dinas','kementerian','rs ','rumah sakit','bank'];
+  const lower = text.toLowerCase();
+  for (const kw of keywords) {
+    const idx = lower.indexOf(kw);
+    if (idx !== -1) return text.slice(idx, idx + 80).split(/[,|·\n]/)[0].trim();
+  }
+  return '';
+}
+
+function extractRoleFromText(text: string): string {
+  const roles = [
+    'software engineer','data scientist','developer','manager','director',
+    'CEO','CTO','lecturer','dosen','researcher','analis','konsultan',
+    'professor','dr.','kepala','koordinator','staff','pegawai','guru',
+    'dokter','perawat','pengacara','akuntan','wirausaha','entrepreneur',
+    'PNS','ASN','aparatur sipil',
+  ];
+  const lower = text.toLowerCase();
+  for (const role of roles) {
+    if (lower.includes(role.toLowerCase())) return role;
+  }
+  return '';
+}
+
+function extractLocationFromText(text: string): string {
+  const cities = [
+    'jakarta','surabaya','bandung','malang','yogyakarta','semarang',
+    'medan','makassar','bali','denpasar','solo','bogor','depok',
+    'tangerang','bekasi','palembang','balikpapan','pontianak',
+  ];
+  const lower = text.toLowerCase();
+  for (const city of cities) {
+    if (lower.includes(city)) return city.charAt(0).toUpperCase() + city.slice(1);
+  }
+  return '';
+}
+
+function extractYearFromText(text: string): number | undefined {
+  const match = text.match(/\b(20\d{2}|19[89]\d)\b/);
+  return match ? parseInt(match[1]) : undefined;
+}
+
+function extractEmailFromText(text: string): string | null {
+  const match = text.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
+  return match?.[0] ?? null;
+}
+
+function extractPhoneFromText(text: string): string | null {
+  const match = text.match(/(\+62|62|0)[0-9\-\s]{8,14}/);
+  return match?.[0]?.replace(/\s/g, '') ?? null;
+}
+
+function detectEmploymentType(text: string): string | null {
+  const lower = text.toLowerCase();
+  if (lower.match(/\bpns\b|\basin\b|aparatur sipil|pegawai negeri/)) return 'PNS';
+  if (lower.match(/wiraswasta|wirausaha|entrepreneur|usaha sendiri|founder|owner|direktur cv|direktur pt/)) return 'Wirausaha';
+  if (lower.match(/pt\s|tbk|swasta|perusahaan|karyawan|staff/)) return 'Swasta';
+  return null;
 }

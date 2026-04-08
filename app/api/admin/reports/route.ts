@@ -43,13 +43,13 @@ export async function GET(req: NextRequest) {
   if (type === 'alumni') {
     const { data } = await supabase
       .from('alumni_profiles')
-      .select('full_name,nim,graduation_year,study_program,linkedin_url,tracking_status,current_position,current_company')
+      .select('full_name,nim,graduation_year,study_program,phone_number,employment_sector,linkedin_url,instagram_url,facebook_url,tiktok_url,tracking_status,current_position,current_company')
       .order('full_name');
     csv = toCSV(data || []);
   } else if (type === 'milestones') {
     const { data } = await supabase
       .from('career_milestones')
-      .select('alumni_profiles(full_name,nim), company_name, position_title, start_date, classification_label, verification_status');
+      .select('alumni_profiles(full_name,nim), company_name, position_title, start_date, classification_label, verification_status, work_address, company_social_media');
     const flat = (data || []).map((r: any) => ({
       full_name: r.alumni_profiles?.full_name,
       nim: r.alumni_profiles?.nim,
@@ -58,6 +58,8 @@ export async function GET(req: NextRequest) {
       start_date: r.start_date,
       classification_label: r.classification_label,
       verification_status: r.verification_status,
+      work_address: r.work_address,
+      company_social_media: r.company_social_media,
     }));
     csv = toCSV(flat);
   } else if (type === 'certifications') {

@@ -70,15 +70,25 @@ export default function ProfilePage() {
                   {profile.study_program} · Class of {profile.graduation_year}
                 </p>
               )}
-              {profile.linkedin_url && (
-                <a
-                  href={profile.linkedin_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary-600 text-sm hover:underline"
-                >
-                  LinkedIn Profile →
-                </a>
+              <div className="flex flex-wrap gap-2 mt-1">
+                {profile.linkedin_url && (
+                  <a href={profile.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 text-xs hover:underline bg-blue-50 px-2 py-0.5 rounded">LinkedIn →</a>
+                )}
+                {profile.instagram_url && (
+                  <a href={profile.instagram_url} target="_blank" rel="noopener noreferrer" className="text-pink-600 text-xs hover:underline bg-pink-50 px-2 py-0.5 rounded">Instagram →</a>
+                )}
+                {profile.facebook_url && (
+                  <a href={profile.facebook_url} target="_blank" rel="noopener noreferrer" className="text-blue-700 text-xs hover:underline bg-blue-50 px-2 py-0.5 rounded">Facebook →</a>
+                )}
+                {profile.tiktok_url && (
+                  <a href={profile.tiktok_url} target="_blank" rel="noopener noreferrer" className="text-gray-800 text-xs hover:underline bg-gray-100 px-2 py-0.5 rounded">TikTok →</a>
+                )}
+              </div>
+              {profile.phone_number && (
+                <p className="text-gray-500 text-xs mt-1">📱 {profile.phone_number}</p>
+              )}
+              {profile.employment_sector && (
+                <p className="text-gray-500 text-xs">💼 {profile.employment_sector}</p>
               )}
             </div>
           </div>

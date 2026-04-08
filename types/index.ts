@@ -17,6 +17,13 @@ export interface AlumniProfile {
   linkedin_url?: string;
   photo_url?: string;
   email?: string;
+  // kontak & sosmed tambahan
+  phone_number?: string;
+  instagram_url?: string;
+  facebook_url?: string;
+  tiktok_url?: string;
+  // pekerjaan
+  employment_sector?: 'PNS' | 'Swasta' | 'Wirausaha' | 'Lainnya';
   // v2 tracking fields
   last_tracked_at?: string;
   tracking_status?: TrackingStatus;
@@ -38,6 +45,8 @@ export interface CareerMilestone {
   start_date: string;
   classification_label: ClassificationLabel;
   verification_status: VerificationStatus;
+  work_address?: string;
+  company_social_media?: string;
   created_at?: string;
 }
 
